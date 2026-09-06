@@ -125,6 +125,15 @@ If that fails or shows below 3.10:
 - **Windows:** `winget install Python.Python.3.12`
 - **Linux:** `sudo apt-get install -y python3.12`
 
+Then install the one library the checks need:
+
+```bash
+python3 -m pip install pyyaml
+```
+
+Without it, `verify.sh` cannot check that your YAML files parse and will tell you so rather than
+quietly skipping.
+
 Windows users: the command is `python`, not `python3`.
 
 ---
@@ -236,26 +245,39 @@ If a check fails, the output names the exact file and line. Fix it and run again
 ## Step E — Start the local database
 
 ```bash
-docker compose up -d
+bash scripts/dev-up.sh
 ```
 
-This starts three containers:
+This checks the ports are free *before* starting anything, then brings up three containers and
+waits for them to report healthy. (`docker compose up -d` works too, but gives you a raw daemon
+error if a port is taken.)
 
-| Container | What it is | Port |
+The three containers:
+
+| Container | What it is | Port on your machine |
 |---|---|---|
-| `socialremit-postgres` | The database each service will own a slice of | 5432 |
-| `socialremit-redis` | Short-lived state (rate limit counters, caches) | 6379 |
+| `socialremit-postgres` | The database each service will own a slice of | **5433** |
+| `socialremit-redis` | Short-lived state (rate limit counters, caches) | **6380** |
 | `socialremit-localstack` | A fake AWS on your laptop — SQS, EventBridge, S3, Secrets Manager | 4566 |
+
+Note the ports: PostgreSQL is on **5433**, not the usual 5432, and Redis on **6380**, not 6379.
+Those defaults exist because a PostgreSQL already installed on your machine is the most common
+setup collision there is, and Docker cannot bind a port something else is holding.
+
+Inside Docker the containers still use their standard ports. The numbers above only matter when
+you connect from your own machine. To change them, copy `.env.example` to `.env` and edit.
 
 LocalStack means you can develop and test queues and events without an AWS account and without
 spending anything.
 
-**Check they started:**
+The script prints the status of each container when it finishes. All three should say `healthy`.
+First run downloads about 400 MB of images and can take several minutes — that is normal and
+happens once.
+
+You can check again at any time with:
 ```bash
 docker compose ps
 ```
-All three should say `running` or `healthy`. Give it 20–30 seconds on first run — it downloads
-images.
 
 ---
 
@@ -277,21 +299,55 @@ document in the repo for understanding *why* the code looks the way it does.
 
 **Check it worked:**
 ```bash
-docker exec -it socialremit-postgres psql -U socialremit -d socialremit_dev -c '\dt'
+docker exec -it socialremit-postgres psql -U socialremit -d socialremit_dev -c '\dt identity_access.*'
 ```
-You should see the three tables listed. Type `\q` and Enter to exit if it drops you into a prompt.
+
+You should see `outbox_events`, `inbox_messages` and `idempotency_records`.
+
+Note the `identity_access.` prefix. A bare `\dt` reports "Did not find any relations" — that is
+correct, not a failure. `\dt` looks only at the `public` schema, and nothing lives there. Each
+service owns its own schema, which is how they stay isolated. In production each becomes a
+separate database entirely.
+
+See all seven at once:
+```bash
+docker exec -it socialremit-postgres psql -U socialremit -d socialremit_dev \
+  -c "SELECT table_schema, count(*) AS tables
+      FROM information_schema.tables
+      WHERE table_schema NOT IN ('pg_catalog','information_schema')
+      GROUP BY 1 ORDER BY 1;"
+```
+Seven schemas, three tables each.
+
+That form runs `psql` *inside* the container, so it works regardless of which host port you chose
+and needs nothing installed on your Mac. If you want your own `psql` client on the host, macOS
+does not ship one — install it first:
+```bash
+brew install libpq && brew link --force libpq
+psql -h localhost -p 5433 -U socialremit -d socialremit_dev
+```
+This is optional; the `docker exec` form does the same job. Type `\q` and Enter to exit an
+interactive prompt.
 
 ---
 
 ## Step G — Look at the API
 
 ```bash
-redocly preview-docs contracts/openapi/mobile-bff.v1.yaml
+bash scripts/api-docs.sh
 ```
 
-Open http://localhost:8080 in your browser. You will see every endpoint the mobile app is allowed
-to call, with request and response shapes. This is the contract — the promise the backend makes to
-the app. Press `Ctrl+C` in the terminal to stop it.
+This builds a browsable HTML page and opens it. You will see every endpoint the mobile app is
+allowed to call, with request and response shapes. This is the contract — the promise the backend
+makes to the app.
+
+Under the hood it runs:
+```bash
+redocly build-docs contracts/openapi/mobile-bff.v1.yaml -o build/api-docs.html
+```
+
+If you find `redocly preview-docs` in an older note, it no longer exists — it was removed in
+Redocly CLI v2. `build-docs` is the replacement.
 
 ---
 
@@ -318,10 +374,35 @@ Close the terminal and open a new one. Installers modify PATH; open terminals do
 **`Cannot connect to the Docker daemon`**
 Docker Desktop is not running. Start it and wait for the whale icon to stop animating.
 
-**`port 5432 is already allocated`**
-You have PostgreSQL already running on your machine. Either stop it
-(`brew services stop postgresql`) or change the port in `docker-compose.yml` from `5432:5432` to
-`5433:5432` and use 5433 in your connection strings.
+**`ports are not available ... address already in use`**
+Something on your machine already holds that port. Find out what:
+
+```bash
+lsof -nP -iTCP:5433 -sTCP:LISTEN     # macOS / Linux — change the number to the reported port
+netstat -ano | findstr :5433         # Windows
+```
+
+Then either stop it, or pick a different port. Do not edit `docker-compose.yml` — copy the example
+env file and change the number there:
+
+```bash
+cp .env.example .env
+# edit SR_POSTGRES_PORT / SR_REDIS_PORT / SR_LOCALSTACK_PORT
+docker compose down
+docker compose up -d
+```
+
+Common holders of these ports on a Mac: Postgres.app and `brew services` PostgreSQL on 5432,
+a Homebrew Redis on 6379. Stop a Homebrew service with `brew services stop postgresql@16`.
+
+**A previous `docker compose up` failed halfway**
+Some containers started and others did not. Clear the partial state before retrying:
+
+```bash
+docker compose down
+docker compose up -d
+docker compose ps
+```
 
 **`redocly: command not found` after npm install -g**
 npm's global folder is not on your PATH. Use the `~/.npm-global` fix in Step C.
@@ -330,11 +411,28 @@ npm's global folder is not on your PATH. Use the `~/.npm-global` fix in Step C.
 ```bash
 chmod +x scripts/*.sh
 ```
+Or just prefix it: `bash scripts/verify.sh`.
+
+**`OpenAPI lint reported problems`**
+The full linter output is printed underneath, with file and line numbers. The most common cause is
+an unquoted comma inside a YAML flow mapping — `{ description: A, B }` silently becomes two
+properties. Quote the value or use a block mapping.
 
 **`dotnet build` fails with package version errors**
 Expected at Step 1. `Directory.Packages.props` contains indicative .NET 10 package versions that
 were never resolved against a real registry. Run `dotnet restore` and correct the versions it
 rejects. There is also no `.sln` and no service projects yet — those arrive in Step 3.
+
+**`psql: Did not find any relations`**
+Not a failure. Tables live in per-service schemas, not `public`. Use `\dt identity_access.*`, or
+`\dnS` to list every schema.
+
+**`zsh: command not found: psql`**
+macOS does not ship a PostgreSQL client. You do not need one — use the `docker exec` form. If you
+want it anyway: `brew install libpq && brew link --force libpq`.
+
+**`redocly preview-docs` just prints the command list**
+That command was removed in Redocly CLI v2. Use `bash scripts/api-docs.sh` instead.
 
 **Everything is broken and I want to start over**
 ```bash

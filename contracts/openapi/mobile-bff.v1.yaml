@@ -8,6 +8,10 @@ info:
     appears in this contract. The client renders `meta.journeyState` and `meta.nextActions`;
     it never infers journey position from completed screens.
 
+  license:
+    name: Proprietary — Social Remit Ltd. Internal use only.
+    url: https://socialremit.com/legal/api-terms
+
 servers:
   - url: https://api.socialremit.com
     description: Production
@@ -15,16 +19,46 @@ servers:
     description: Sandbox
 
 tags:
-  - name: App          # Section 1
-  - name: Journey      # Section 1
-  - name: Profile      # Sections 1-2
-  - name: PhoneChallenge  # Section 2
-  - name: Legal        # Section 2
-  - name: Passcode     # Section 3
-  - name: Devices      # Section 3
-  - name: Sessions     # Section 3
-  - name: Recovery     # Section 3
-  - name: Security     # Section 3
+  - name: App
+    description: >
+      Section 1. Version gating, maintenance state and Help. Reachable without
+      authentication at every journey state, including when the app is blocked.
+  - name: Journey
+    description: >
+      Section 1. Registration journey lifecycle. The server owns journey position;
+      the client renders what it is told and never infers state from screens shown.
+  - name: Profile
+    description: >
+      Sections 1 and 2. Preferred name, greeting and first service intent. None of
+      these are identity data and none may be written to legal_name.
+  - name: PhoneChallenge
+    description: >
+      Section 2. Mobile number verification by one-time passcode. Responses are
+      identical whether or not the number already has an account.
+  - name: Legal
+    description: >
+      Section 2. Terms acceptance and privacy acknowledgement against exact document
+      versions, plus provisional communication preferences.
+  - name: Passcode
+    description: >
+      Section 3. Five-digit passcode credential lifecycle. The raw value is never
+      stored, logged or returned.
+  - name: Devices
+    description: >
+      Section 3. Device registration, trust state and per-device biometric
+      preference. Biometric templates never leave the device.
+  - name: Sessions
+    description: >
+      Section 3. Sign-in orchestration. The server decides which factors are
+      required; the client does not choose.
+  - name: Recovery
+    description: >
+      Section 3. Regaining access when the registered mobile number is no longer
+      reachable. Rate-limited and enumeration-resistant.
+  - name: Security
+    description: >
+      Section 3. Central step-up authorisation policy for sensitive actions. Fails
+      closed: an undeterminable decision is a denial, never an allow.
 
 paths:
 
@@ -43,9 +77,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AppBootstrap' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AppBootstrap' }
         '426': { $ref: '#/components/responses/Error' }   # APP_VERSION_UNSUPPORTED
         '503': { $ref: '#/components/responses/Error' }   # MAINTENANCE_MODE
 
@@ -62,9 +98,12 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/HelpEntry' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/HelpEntry' }
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/journeys/registration:
     post:
@@ -81,9 +120,12 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/RegistrationJourney' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RegistrationJourney' }
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/journeys/{journeyId}:
     get:
@@ -103,9 +145,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/RegistrationJourney' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/RegistrationJourney' }
         '404': { $ref: '#/components/responses/Error' }
         '410': { $ref: '#/components/responses/Error' }   # JOURNEY_EXPIRED
 
@@ -132,9 +176,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/GreetingPreference' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/GreetingPreference' }
+        '400': { $ref: '#/components/responses/Error' }   # VALIDATION_FAILED
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   /v1/customers/me/service-intent:
     put:
@@ -159,13 +207,17 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data:
-                    type: object
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
                     properties:
-                      intent: { type: string }
-                      nextAction: { $ref: '#/components/schemas/NextAction' }
+                      data:
+                        type: object
+                        properties:
+                          intent: { type: string }
+                          nextAction: { $ref: '#/components/schemas/NextAction' }
+        '400': { $ref: '#/components/responses/Error' }   # VALIDATION_FAILED
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   # ── Section 2: account creation ──────────────────────────────────────────────
   /v1/phone-challenges:
@@ -196,9 +248,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhoneChallenge' }
         '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/phone-challenges/{challengeId}/verify:
@@ -225,13 +279,15 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data:
-                    type: object
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
                     properties:
-                      verified: { type: boolean, const: true }
-                      setupToken: { type: [string, 'null'], description: Short-lived token permitting passcode setup }
+                      data:
+                        type: object
+                        properties:
+                          verified: { type: boolean, const: true }
+                          setupToken: { type: [string, 'null'], description: Short-lived token permitting passcode setup }
         '400': { $ref: '#/components/responses/Error' }   # OTP_INVALID / OTP_EXPIRED / OTP_INVALIDATED
 
   /v1/phone-challenges/{challengeId}/resend:
@@ -248,9 +304,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhoneChallenge' }
         '429': { $ref: '#/components/responses/Error' }   # RESEND_TOO_SOON
 
   /v1/legal/account-documents:
@@ -266,14 +324,17 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data:
-                    type: object
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
                     properties:
-                      documents:
-                        type: array
-                        items: { $ref: '#/components/schemas/LegalDocument' }
+                      data:
+                        type: object
+                        properties:
+                          documents:
+                            type: array
+                            items: { $ref: '#/components/schemas/LegalDocument' }
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/legal/account-acceptances:
     post:
@@ -307,6 +368,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400': { $ref: '#/components/responses/Error' }   # VALIDATION_FAILED — unknown or superseded document version
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   /v1/customers/me/communication-preference:
     put:
@@ -335,9 +398,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/CommunicationPreference' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/CommunicationPreference' }
+        '400': { $ref: '#/components/responses/Error' }   # VALIDATION_FAILED
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   # ── Section 3: authentication and security ───────────────────────────────────
   /v1/passcode/setup:
@@ -365,9 +432,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthenticatedSession' }
         '400': { $ref: '#/components/responses/Error' }   # PASSCODE_MISMATCH / PASSCODE_WEAK
 
   /v1/passcode/verify:
@@ -393,9 +462,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthenticatedSession' }
         '401': { $ref: '#/components/responses/Error' }   # PASSCODE_INVALID
         '423': { $ref: '#/components/responses/Error' }   # PASSCODE_COOLDOWN
 
@@ -412,9 +483,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthorizationDecision' }
+        '403': { $ref: '#/components/responses/Error' }   # RECOVERY_MANUAL_REQUIRED
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/passcode/reset:
     post:
@@ -440,6 +515,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Envelope' }
+        '400': { $ref: '#/components/responses/Error' }   # PASSCODE_MISMATCH / PASSCODE_WEAK
+        '401': { $ref: '#/components/responses/Error' }   # Reset token invalid or expired
 
   /v1/devices/register:
     post:
@@ -465,9 +542,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/Device' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Device' }
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
+        '403': { $ref: '#/components/responses/Error' }   # AUTHENTICATION_STEP_UP_REQUIRED — factors not all satisfied
 
   /v1/devices/me:
     get:
@@ -482,9 +563,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/Device' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Device' }
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
+        '404': { $ref: '#/components/responses/Error' }   # Device not registered
 
   /v1/devices/me/biometrics:
     put:
@@ -511,9 +596,13 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/Device' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/Device' }
+        '400': { $ref: '#/components/responses/Error' }   # VALIDATION_FAILED
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   /v1/sessions:
     post:
@@ -551,9 +640,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthenticatedSession' }
         '401': { $ref: '#/components/responses/Error' }
         '403': { $ref: '#/components/responses/Error' }   # DEVICE_UNRECOGNIZED / STEP_UP_REQUIRED
 
@@ -566,6 +657,7 @@ paths:
       parameters: [$ref: '#/components/parameters/CorrelationId']
       responses:
         '204': { description: Signed out }
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
 
   /v1/recovery/intents:
     post:
@@ -592,9 +684,12 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthorizationDecision' }
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
 
   /v1/recovery/{recoveryId}/email-challenge:
     post:
@@ -615,9 +710,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhoneChallenge' }
         '409': { $ref: '#/components/responses/Error' }   # RECOVERY_EMAIL_UNVERIFIED
 
   /v1/recovery/{recoveryId}/new-phone-challenge:
@@ -650,9 +747,11 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/PhoneChallenge' }
         '403': { $ref: '#/components/responses/Error' }   # RECOVERY_MANUAL_REQUIRED
 
   /v1/security/authorize-action:
@@ -689,19 +788,44 @@ paths:
           content:
             application/json:
               schema:
-                allOf: [$ref: '#/components/schemas/Envelope']
-                properties:
-                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+                allOf:
+                  - $ref: '#/components/schemas/Envelope'
+                  - type: object
+                    properties:
+                      data: { $ref: '#/components/schemas/AuthorizationDecision' }
+        '401': { $ref: '#/components/responses/Error' }   # SESSION_EXPIRED
+        '403': { $ref: '#/components/responses/Error' }   # ACCOUNT_RESTRICTED / RISK_REVIEW_REQUIRED
 
 components:
 
   securitySchemes:
-    sessionToken:      { type: http, scheme: bearer, bearerFormat: JWT, description: Authenticated customer session }
-    journeyToken:      { type: http, scheme: bearer, description: Short-lived registration journey token }
-    setupToken:        { type: http, scheme: bearer, description: Phone-verified, passcode-not-yet-configured }
-    pendingAuthToken:  { type: http, scheme: bearer, description: Sign-in in progress, factors outstanding }
-    recoveryToken:     { type: http, scheme: bearer, description: Recovery case in progress }
-    resetToken:        { type: http, scheme: bearer, description: Approved passcode reset }
+    # Block mappings, not flow mappings. An unquoted comma inside { ... } silently
+    # splits into a second property — which is exactly the bug this file shipped with.
+    sessionToken:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Authenticated customer session.
+    journeyToken:
+      type: http
+      scheme: bearer
+      description: Short-lived registration journey token.
+    setupToken:
+      type: http
+      scheme: bearer
+      description: Phone verified, passcode not yet configured.
+    pendingAuthToken:
+      type: http
+      scheme: bearer
+      description: Sign-in in progress with factors still outstanding.
+    recoveryToken:
+      type: http
+      scheme: bearer
+      description: Recovery case in progress.
+    resetToken:
+      type: http
+      scheme: bearer
+      description: Approved passcode reset.
 
   parameters:
     CorrelationId:
@@ -746,13 +870,22 @@ components:
       description: Canonical Social Remit error. Provider error text is never surfaced.
       content:
         application/json:
-          schema:
-            allOf: [$ref: '#/components/schemas/Envelope']
-            properties:
-              data:  { type: 'null' }
-              error: { $ref: '#/components/schemas/ApiError' }
+          schema: { $ref: '#/components/schemas/ErrorEnvelope' }
 
   schemas:
+
+    ErrorEnvelope:
+      # Declared standalone rather than as `allOf: [Envelope, { error: ApiError }]`.
+      # Merging a non-null `error` over the base envelope's nullable one produces a
+      # null-versus-object conflict that generators either warn about or resolve
+      # inconsistently — and a client whose generated type is wrong about whether
+      # `error` can be null is a crash waiting to happen.
+      type: object
+      required: [data, meta, error]
+      properties:
+        data:  { type: 'null' }
+        meta:  { $ref: '#/components/schemas/Meta' }
+        error: { $ref: '#/components/schemas/ApiError' }
 
     Envelope:
       type: object

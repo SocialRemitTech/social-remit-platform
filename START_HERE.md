@@ -47,6 +47,8 @@ social-remit-platform/
 ├── README.md                        the 14-step build plan
 ├── CONTRIBUTING.md                  how to make a change
 ├── docker-compose.yml               local Postgres + Redis + fake AWS
+├── redocly.yaml                     pinned API lint rules
+├── .env.example                     local port and connection overrides
 ├── Directory.Build.props            compiler settings for every project
 ├── Directory.Packages.props         one place where NuGet versions are declared
 │
@@ -66,6 +68,8 @@ social-remit-platform/
 │
 ├── db/platform/001_building_blocks.sql   the three tables every service gets
 ├── docs/                            explanations and decision records
+├── scripts/dev-up.sh                starts the local containers safely
+├── scripts/api-docs.sh              browsable HTML of the mobile contract
 ├── scripts/verify.sh                run before every push
 ├── scripts/dev-db.sh                creates the local tables
 └── .github/workflows/contracts.yml  the 6 CI checks

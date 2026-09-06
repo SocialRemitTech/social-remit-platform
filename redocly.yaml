@@ -1,0 +1,49 @@
+# Lint configuration for Social Remit API contracts.
+#
+# Without this file, Redocly falls back to "built in recommended configuration"
+# — which means a rule can change under you on a CLI upgrade and a contract that
+# passed yesterday fails today. Pinning the rules makes lint results reproducible
+# across every laptop and CI runner.
+
+apis:
+  mobile-bff@v1:
+    root: contracts/openapi/mobile-bff.v1.yaml
+
+rules:
+
+  # ── Structural correctness: never negotiable ──────────────────────────────
+  struct: error
+  no-unresolved-refs: error
+  spec-strict-refs: error
+  no-invalid-schema-examples: error
+  no-invalid-parameter-examples: error
+
+  # ── Contract completeness ─────────────────────────────────────────────────
+  # Every operation documents at least one failure. A contract that only
+  # describes the happy path pushes error handling into tribal knowledge, and
+  # the mobile team ends up guessing which codes to handle.
+  operation-4xx-response: error
+  operation-operationId: error
+  operation-operationId-unique: error
+  operation-summary: error
+  operation-description: off        # summary is required; description is optional detail
+  tag-description: error
+  info-license: error
+  info-contact: off
+
+  # ── Naming and consistency ────────────────────────────────────────────────
+  path-segment-plural: off          # /v1/customers/me/greeting is correct as written
+  path-declaration-must-exist: error
+  path-parameters-defined: error
+  no-ambiguous-paths: error
+  no-identical-paths: error
+  spec-components-invalid-map-name: error
+
+  # ── Security ──────────────────────────────────────────────────────────────
+  security-defined: off             # several routes are deliberately unauthenticated
+  no-http-verbs-in-paths: error
+
+  # ── Style ─────────────────────────────────────────────────────────────────
+  no-empty-servers: error
+  no-server-trailing-slash: error
+  no-unused-components: warn

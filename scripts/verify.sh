@@ -12,11 +12,14 @@ cd "$(dirname "$0")/.."
 
 GREEN=$'\033[0;32m'; RED=$'\033[0;31m'; YELLOW=$'\033[0;33m'; DIM=$'\033[2m'; RESET=$'\033[0m'
 FAILURES=0
+GAPS_COUNT=0
+GAPS_TEXT=""
 
 pass() { echo "  ${GREEN}✓${RESET} $1"; }
 fail() { echo "  ${RED}✗${RESET} $1"; FAILURES=$((FAILURES + 1)); }
 skip() { echo "  ${YELLOW}−${RESET} $1 ${DIM}(skipped)${RESET}"; }
-head() { echo; echo "${DIM}──${RESET} $1"; }
+gap()  { echo "  ${YELLOW}!${RESET} $1"; GAPS_COUNT=$((GAPS_COUNT + 1)); GAPS_TEXT="${GAPS_TEXT}${1}\n"; }
+section() { echo; echo "${DIM}──${RESET} $1"; }
 
 PYTHON=$(command -v python3 || command -v python)
 if [ -z "$PYTHON" ]; then
@@ -25,11 +28,11 @@ if [ -z "$PYTHON" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-head "Structural validity"
+section "Structural validity"
 # ---------------------------------------------------------------------------
 
 if "$PYTHON" -c "import yaml" 2>/dev/null; then
-  for file in contracts/openapi/*.yaml .github/workflows/*.yml docker-compose.yml; do
+  for file in contracts/openapi/*.yaml redocly.yaml .github/workflows/*.yml docker-compose.yml; do
     [ -f "$file" ] || continue
     if "$PYTHON" -c "import yaml,sys; yaml.safe_load(open(sys.argv[1]))" "$file" 2>/dev/null; then
       pass "$file parses"
@@ -39,7 +42,9 @@ if "$PYTHON" -c "import yaml" 2>/dev/null; then
     fi
   done
 else
-  skip "YAML parsing (pip install pyyaml)"
+  # Tracked, not silently swallowed. A skipped check reads like a passing one at
+  # a glance, which is how a broken workflow file reaches CI unnoticed.
+  gap "YAML parsing — install with:  $PYTHON -m pip install pyyaml"
 fi
 
 for file in contracts/events/*.json contracts/errors/*.json; do
@@ -52,22 +57,25 @@ for file in contracts/events/*.json contracts/errors/*.json; do
 done
 
 # ---------------------------------------------------------------------------
-head "OpenAPI contract"
+section "OpenAPI contract"
 # ---------------------------------------------------------------------------
 
 if command -v redocly >/dev/null 2>&1; then
-  if redocly lint contracts/openapi/*.yaml --format=summary >/tmp/sr-redocly.log 2>&1; then
+  # stylish, not summary: a summary tells you "struct: 2" and nothing about WHERE.
+  # That cost a real debugging session, so the full output is the default now.
+  if redocly lint contracts/openapi/*.yaml --format=stylish >/tmp/sr-redocly.log 2>&1; then
     pass "OpenAPI lint clean"
   else
     fail "OpenAPI lint reported problems"
-    sed 's/^/      /' /tmp/sr-redocly.log | tail -20
+    echo
+    sed 's/^/      /' /tmp/sr-redocly.log
   fi
 else
   skip "OpenAPI lint (npm install -g @redocly/cli)"
 fi
 
 # ---------------------------------------------------------------------------
-head "Data protection"
+section "Data protection"
 # ---------------------------------------------------------------------------
 
 # Nothing that could identify or impersonate a customer may appear in an event
@@ -126,7 +134,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-head "Contract and code in sync"
+section "Contract and code in sync"
 # ---------------------------------------------------------------------------
 
 # If the catalogue and the C# constants drift apart, the server sends a code the
@@ -156,7 +164,7 @@ PY
 [ $? -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # ---------------------------------------------------------------------------
-head "Service isolation"
+section "Service isolation"
 # ---------------------------------------------------------------------------
 
 # ADR 0001: a service may reference building-blocks and nothing else under /services.
@@ -191,7 +199,7 @@ PY
 [ $? -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # ---------------------------------------------------------------------------
-head ".NET build"
+section ".NET build"
 # ---------------------------------------------------------------------------
 
 if command -v dotnet >/dev/null 2>&1; then
@@ -211,6 +219,14 @@ fi
 
 # ---------------------------------------------------------------------------
 echo
+if [ "$GAPS_COUNT" -gt 0 ]; then
+  echo "${YELLOW}${GAPS_COUNT} check(s) could not run — your setup is incomplete:${RESET}"
+  printf "%b" "$GAPS_TEXT" | while IFS= read -r g; do
+    [ -n "$g" ] && echo "  ${YELLOW}!${RESET} $g"
+  done
+  echo
+fi
+
 if [ "$FAILURES" -eq 0 ]; then
   echo "${GREEN}ALL CHECKS PASSED${RESET}"
   exit 0
