@@ -1,0 +1,58 @@
+# ── .NET ────────────────────────────────────────────────────────────────────
+bin/
+obj/
+[Dd]ebug/
+[Rr]elease/
+*.user
+*.suo
+*.userprefs
+TestResults/
+*.trx
+*.coverage
+coverage*.json
+coverage*.xml
+.vs/
+
+# ── Node (contract tooling only) ────────────────────────────────────────────
+node_modules/
+npm-debug.log*
+.npm/
+
+# ── Terraform ───────────────────────────────────────────────────────────────
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+*.tfvars
+!example.tfvars
+crash.log
+
+# ── Secrets — nothing here should ever be committed ─────────────────────────
+# Real configuration comes from AWS Secrets Manager and Parameter Store.
+# If you find yourself wanting to commit a value, it belongs there instead.
+.env
+.env.*
+!.env.example
+appsettings.Local.json
+appsettings.*.Local.json
+*.pem
+*.key
+*.pfx
+secrets.json
+
+# ── IDEs ────────────────────────────────────────────────────────────────────
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.shared.json
+*.swp
+*.swo
+
+# ── OS ──────────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+
+# ── Local scratch ───────────────────────────────────────────────────────────
+/tmp/
+*.log
+.scratch/

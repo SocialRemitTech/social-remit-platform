@@ -1,0 +1,905 @@
+openapi: 3.1.0
+info:
+  title: Social Remit Mobile BFF
+  version: 1.0.0
+  description: >
+    Public contract consumed by the Social Remit mobile application. This is the ONLY backend
+    entry point for the app (Baseline 2.0 §2.1.8). No provider identifier, status or error text
+    appears in this contract. The client renders `meta.journeyState` and `meta.nextActions`;
+    it never infers journey position from completed screens.
+
+servers:
+  - url: https://api.socialremit.com
+    description: Production
+  - url: https://api.sandbox.socialremit.com
+    description: Sandbox
+
+tags:
+  - name: App          # Section 1
+  - name: Journey      # Section 1
+  - name: Profile      # Sections 1-2
+  - name: PhoneChallenge  # Section 2
+  - name: Legal        # Section 2
+  - name: Passcode     # Section 3
+  - name: Devices      # Section 3
+  - name: Sessions     # Section 3
+  - name: Recovery     # Section 3
+  - name: Security     # Section 3
+
+paths:
+
+  # ── Section 1: app entry and product access ──────────────────────────────────
+  /v1/app/bootstrap:
+    get:
+      tags: [App]
+      operationId: getAppBootstrap
+      summary: Supported version, maintenance state, locale, public flags, Help entry
+      security: []
+      parameters: [$ref: '#/components/parameters/AppVersion', $ref: '#/components/parameters/Platform',
+                   $ref: '#/components/parameters/DeviceInstallationId', $ref: '#/components/parameters/CorrelationId']
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AppBootstrap' }
+        '426': { $ref: '#/components/responses/Error' }   # APP_VERSION_UNSUPPORTED
+        '503': { $ref: '#/components/responses/Error' }   # MAINTENANCE_MODE
+
+  /v1/help/entry:
+    get:
+      tags: [App]
+      operationId: getHelpEntry
+      summary: Help URL and contact options; available unauthenticated at every journey state
+      security: []
+      parameters: [$ref: '#/components/parameters/CorrelationId']
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/HelpEntry' }
+
+  /v1/journeys/registration:
+    post:
+      tags: [Journey]
+      operationId: createRegistrationJourney
+      summary: Create a registration journey and issue a short-lived journey token
+      security: []
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/AppVersion',
+                   $ref: '#/components/parameters/Platform', $ref: '#/components/parameters/DeviceInstallationId',
+                   $ref: '#/components/parameters/CorrelationId']
+      responses:
+        '201':
+          description: Journey created
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/RegistrationJourney' }
+
+  /v1/journeys/{journeyId}:
+    get:
+      tags: [Journey]
+      operationId: getJourney
+      summary: Resume a journey; returns authoritative current state and allowed actions
+      security: [{ journeyToken: [] }, { sessionToken: [] }]
+      parameters:
+        - name: journeyId
+          in: path
+          required: true
+          schema: { type: string, pattern: '^jrny_[A-Za-z0-9]{16,}$' }
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/RegistrationJourney' }
+        '404': { $ref: '#/components/responses/Error' }
+        '410': { $ref: '#/components/responses/Error' }   # JOURNEY_EXPIRED
+
+  /v1/customers/me/greeting:
+    put:
+      tags: [Profile]
+      operationId: setGreeting
+      summary: Save preferred name and greeting. Never written to legal_name.
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                preferredName:    { type: [string, 'null'], maxLength: 40 }
+                preferredGreeting: { type: [string, 'null'], maxLength: 40 }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/GreetingPreference' }
+
+  /v1/customers/me/service-intent:
+    put:
+      tags: [Profile]
+      operationId: setServiceIntent
+      summary: Record first chosen service; middleware returns the next action, not the client
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [intent]
+              properties:
+                intent: { type: string, enum: [SEND_MONEY, CHECK_RATES, AIRTIME_AND_DATA, GO_TO_HOME] }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Saved
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      intent: { type: string }
+                      nextAction: { $ref: '#/components/schemas/NextAction' }
+
+  # ── Section 2: account creation ──────────────────────────────────────────────
+  /v1/phone-challenges:
+    post:
+      tags: [PhoneChallenge]
+      operationId: createPhoneChallenge
+      summary: Normalise to E.164 and issue a six-digit OTP. Exactly one active challenge per purpose.
+      description: >
+        Response is identical whether or not the number already has an account (enumeration defence).
+        Client countdowns are informational; `expiresAt` and `resendAvailableAt` are authoritative.
+      security: [{ journeyToken: [] }, { recoveryToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countryCallingCode, nationalNumber, purpose]
+              properties:
+                countryCallingCode: { type: string, pattern: '^\+[0-9]{1,4}$', examples: ['+44'] }
+                nationalNumber:     { type: string, pattern: '^[0-9]{4,15}$' }
+                purpose: { type: string, enum: [PHONE_REGISTRATION, NEW_DEVICE_LOGIN, PHONE_REPLACEMENT] }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+        '429': { $ref: '#/components/responses/Error' }   # RATE_LIMITED
+
+  /v1/phone-challenges/{challengeId}/verify:
+    post:
+      tags: [PhoneChallenge]
+      operationId: verifyPhoneChallenge
+      summary: Explicit confirm. No auto-submit. Three failures invalidate the challenge, not the account.
+      security: [{ journeyToken: [] }, { recoveryToken: [] }]
+      parameters: [$ref: '#/components/parameters/ChallengeId', $ref: '#/components/parameters/IdempotencyKey',
+                   $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [code]
+              properties:
+                code: { type: string, pattern: '^[0-9]{6}$', writeOnly: true }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      verified: { type: boolean, const: true }
+                      setupToken: { type: [string, 'null'], description: Short-lived token permitting passcode setup }
+        '400': { $ref: '#/components/responses/Error' }   # OTP_INVALID / OTP_EXPIRED / OTP_INVALIDATED
+
+  /v1/phone-challenges/{challengeId}/resend:
+    post:
+      tags: [PhoneChallenge]
+      operationId: resendPhoneChallenge
+      summary: Issue a replacement code. Immediately supersedes the previous code.
+      security: [{ journeyToken: [] }, { recoveryToken: [] }]
+      parameters: [$ref: '#/components/parameters/ChallengeId', $ref: '#/components/parameters/IdempotencyKey',
+                   $ref: '#/components/parameters/CorrelationId']
+      responses:
+        '201':
+          description: New challenge issued
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+        '429': { $ref: '#/components/responses/Error' }   # RESEND_TOO_SOON
+
+  /v1/legal/account-documents:
+    get:
+      tags: [Legal]
+      operationId: getAccountDocuments
+      summary: Current Account Terms and Privacy Notice metadata, version and canonical URL
+      security: []
+      parameters: [$ref: '#/components/parameters/CorrelationId']
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      documents:
+                        type: array
+                        items: { $ref: '#/components/schemas/LegalDocument' }
+
+  /v1/legal/account-acceptances:
+    post:
+      tags: [Legal]
+      operationId: recordAccountAcceptance
+      summary: Record Terms acceptance and Privacy acknowledgement against exact document versions
+      security: [{ journeyToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [acceptances]
+              properties:
+                acceptances:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [documentType, documentVersion, action]
+                    properties:
+                      documentType:    { type: string, enum: [ACCOUNT_TERMS, PRIVACY_NOTICE] }
+                      documentVersion: { type: string }
+                      action:          { type: string, enum: [ACCEPTED, ACKNOWLEDGED] }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Recorded
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /v1/customers/me/communication-preference:
+    put:
+      tags: [Legal]
+      operationId: setCommunicationPreference
+      summary: Provisional marketing preference. PROTOTYPE legal status until Legal confirms lawful basis.
+      security: [{ sessionToken: [] }, { journeyToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [purpose, selection]
+              properties:
+                purpose:   { type: string, enum: [MARKETING] }
+                selection: { type: string, enum: [OPTED_IN_OR_NOT_OPTED_OUT, OPTED_OUT] }
+                channels:
+                  type: array
+                  items: { type: string, enum: [EMAIL, SMS, WHATSAPP, PUSH] }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Stored
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/CommunicationPreference' }
+
+  # ── Section 3: authentication and security ───────────────────────────────────
+  /v1/passcode/setup:
+    post:
+      tags: [Passcode]
+      operationId: setupPasscode
+      summary: Activate the five-digit passcode credential. Requires a phone-verified setup token.
+      description: Client sends both entries; the server compares. Never store or log the raw value.
+      security: [{ setupToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passcode, passcodeConfirmation]
+              properties:
+                passcode:             { type: string, pattern: '^[0-9]{5}$', writeOnly: true }
+                passcodeConfirmation: { type: string, pattern: '^[0-9]{5}$', writeOnly: true }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Credential active
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+        '400': { $ref: '#/components/responses/Error' }   # PASSCODE_MISMATCH / PASSCODE_WEAK
+
+  /v1/passcode/verify:
+    post:
+      tags: [Passcode]
+      operationId: verifyPasscode
+      summary: Verify an existing passcode. Returns attempts/cooldown metadata on failure.
+      security: [{ sessionToken: [] }, { pendingAuthToken: [] }]
+      parameters: [$ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passcode]
+              properties:
+                passcode: { type: string, pattern: '^[0-9]{5}$', writeOnly: true }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Verified
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+        '401': { $ref: '#/components/responses/Error' }   # PASSCODE_INVALID
+        '423': { $ref: '#/components/responses/Error' }   # PASSCODE_COOLDOWN
+
+  /v1/passcode/reset-intents:
+    post:
+      tags: [Passcode]
+      operationId: startPasscodeReset
+      summary: Begin policy-driven passcode reset via an accessible verified channel
+      security: [{ pendingAuthToken: [] }, { recoveryToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      responses:
+        '201':
+          description: Reset intent created
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+
+  /v1/passcode/reset:
+    post:
+      tags: [Passcode]
+      operationId: resetPasscode
+      summary: Set a new passcode. Revokes sessions and device trust per security policy.
+      security: [{ resetToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [passcode, passcodeConfirmation]
+              properties:
+                passcode:             { type: string, pattern: '^[0-9]{5}$', writeOnly: true }
+                passcodeConfirmation: { type: string, pattern: '^[0-9]{5}$', writeOnly: true }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Reset complete
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Envelope' }
+
+  /v1/devices/register:
+    post:
+      tags: [Devices]
+      operationId: registerDevice
+      summary: Register the current device. Only after all required factors have succeeded.
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/DeviceInstallationId',
+                   $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                attestationRef: { type: [string, 'null'], description: Platform attestation reference (PLACEHOLDER — technology TBD) }
+                publicKey:      { type: [string, 'null'] }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Registered
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/Device' }
+
+  /v1/devices/me:
+    get:
+      tags: [Devices]
+      operationId: getCurrentDevice
+      summary: Current device trust state and capabilities
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/DeviceInstallationId', $ref: '#/components/parameters/CorrelationId']
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/Device' }
+
+  /v1/devices/me/biometrics:
+    put:
+      tags: [Devices]
+      operationId: setBiometricPreference
+      summary: Record per-device biometric enablement. Never accepts biometric template data.
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/DeviceInstallationId',
+                   $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [enabled]
+              properties:
+                enabled: { type: boolean }
+                assertionResult: { type: [string, 'null'], enum: [SUCCEEDED, CANCELLED, UNAVAILABLE, null] }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Updated
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/Device' }
+
+  /v1/sessions:
+    post:
+      tags: [Sessions]
+      operationId: createSession
+      summary: Orchestrate sign-in. Middleware decides which factors are required.
+      description: >
+        Returns either an authenticated session or a decision naming the outstanding factors.
+        A biometric cancellation is not evidence of a new device.
+      security: []
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/DeviceInstallationId',
+                   $ref: '#/components/parameters/AppVersion', $ref: '#/components/parameters/Platform',
+                   $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [factors]
+              properties:
+                factors:
+                  type: array
+                  minItems: 1
+                  items:
+                    type: object
+                    required: [type]
+                    properties:
+                      type:      { type: string, enum: [PHONE_OTP, EMAIL_OTP, PASSCODE, BIOMETRIC] }
+                      reference: { type: [string, 'null'], description: Challenge ID or platform assertion reference }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Session issued
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthenticatedSession' }
+        '401': { $ref: '#/components/responses/Error' }
+        '403': { $ref: '#/components/responses/Error' }   # DEVICE_UNRECOGNIZED / STEP_UP_REQUIRED
+
+  /v1/sessions/current:
+    delete:
+      tags: [Sessions]
+      operationId: endCurrentSession
+      summary: Sign out
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/CorrelationId']
+      responses:
+        '204': { description: Signed out }
+
+  /v1/recovery/intents:
+    post:
+      tags: [Recovery]
+      operationId: startRecovery
+      summary: Begin recovery when the registered number is inaccessible. Rate-limited, unauthenticated.
+      security: []
+      parameters: [$ref: '#/components/parameters/IdempotencyKey', $ref: '#/components/parameters/DeviceInstallationId',
+                   $ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countryCallingCode, nationalNumber]
+              properties:
+                countryCallingCode: { type: string, pattern: '^\+[0-9]{1,4}$' }
+                nationalNumber:     { type: string, pattern: '^[0-9]{4,15}$' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Recovery case opened; response is uniform regardless of account existence
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+
+  /v1/recovery/{recoveryId}/email-challenge:
+    post:
+      tags: [Recovery]
+      operationId: startRecoveryEmailChallenge
+      summary: Issue an OTP to the verified recovery email. Rejected if the email is unverified.
+      security: [{ recoveryToken: [] }]
+      parameters:
+        - name: recoveryId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      responses:
+        '201':
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+        '409': { $ref: '#/components/responses/Error' }   # RECOVERY_EMAIL_UNVERIFIED
+
+  /v1/recovery/{recoveryId}/new-phone-challenge:
+    post:
+      tags: [Recovery]
+      operationId: startRecoveryNewPhoneChallenge
+      summary: Verify the replacement mobile number once prior recovery factors have succeeded
+      security: [{ recoveryToken: [] }]
+      parameters:
+        - name: recoveryId
+          in: path
+          required: true
+          schema: { type: string }
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/CorrelationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [countryCallingCode, nationalNumber]
+              properties:
+                countryCallingCode: { type: string, pattern: '^\+[0-9]{1,4}$' }
+                nationalNumber:     { type: string, pattern: '^[0-9]{4,15}$' }
+              additionalProperties: false
+      responses:
+        '201':
+          description: Challenge issued
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/PhoneChallenge' }
+        '403': { $ref: '#/components/responses/Error' }   # RECOVERY_MANUAL_REQUIRED
+
+  /v1/security/authorize-action:
+    post:
+      tags: [Security]
+      operationId: authorizeAction
+      summary: Central step-up policy. The client must not decide from elapsed time.
+      security: [{ sessionToken: [] }]
+      parameters: [$ref: '#/components/parameters/CorrelationId']
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [action]
+              properties:
+                action:
+                  type: string
+                  enum: [RECIPIENT_CREATE, RECIPIENT_UPDATE, PHONE_CHANGE, EMAIL_CHANGE,
+                         PROFILE_SENSITIVE_CHANGE, BIOMETRICS_DISABLE, PAYMENT_METHOD_CHANGE,
+                         ACCOUNT_CLOSE, TRANSFER_AUTHORIZE]
+                resourceId: { type: [string, 'null'] }
+                context:
+                  type: object
+                  properties:
+                    journeyId: { type: [string, 'null'] }
+                    amount:    { type: [number, 'null'] }
+                    corridor:  { type: [string, 'null'] }
+              additionalProperties: false
+      responses:
+        '200':
+          description: Decision
+          content:
+            application/json:
+              schema:
+                allOf: [$ref: '#/components/schemas/Envelope']
+                properties:
+                  data: { $ref: '#/components/schemas/AuthorizationDecision' }
+
+components:
+
+  securitySchemes:
+    sessionToken:      { type: http, scheme: bearer, bearerFormat: JWT, description: Authenticated customer session }
+    journeyToken:      { type: http, scheme: bearer, description: Short-lived registration journey token }
+    setupToken:        { type: http, scheme: bearer, description: Phone-verified, passcode-not-yet-configured }
+    pendingAuthToken:  { type: http, scheme: bearer, description: Sign-in in progress, factors outstanding }
+    recoveryToken:     { type: http, scheme: bearer, description: Recovery case in progress }
+    resetToken:        { type: http, scheme: bearer, description: Approved passcode reset }
+
+  parameters:
+    CorrelationId:
+      name: X-Correlation-Id
+      in: header
+      required: false
+      description: Generated by middleware if absent; echoed in meta.correlationId
+      schema: { type: string, format: uuid }
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: true
+      description: >
+        Required on every state-changing operation. Scoped to (key, route, subject). A repeat with
+        the same key replays the original status and body. A repeat with a different body returns
+        IDEMPOTENCY_KEY_REUSED.
+      schema: { type: string, minLength: 16, maxLength: 128 }
+    AppVersion:
+      name: X-App-Version
+      in: header
+      required: true
+      schema: { type: string, pattern: '^[0-9]+\.[0-9]+\.[0-9]+(\+[0-9]+)?$' }
+    Platform:
+      name: X-Platform
+      in: header
+      required: true
+      schema: { type: string, enum: [ios, android] }
+    DeviceInstallationId:
+      name: X-Device-Installation-Id
+      in: header
+      required: true
+      description: App-install identifier. A risk signal, never a standalone identity proof.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+    ChallengeId:
+      name: challengeId
+      in: path
+      required: true
+      schema: { type: string, pattern: '^ch_[A-Za-z0-9]{16,}$' }
+
+  responses:
+    Error:
+      description: Canonical Social Remit error. Provider error text is never surfaced.
+      content:
+        application/json:
+          schema:
+            allOf: [$ref: '#/components/schemas/Envelope']
+            properties:
+              data:  { type: 'null' }
+              error: { $ref: '#/components/schemas/ApiError' }
+
+  schemas:
+
+    Envelope:
+      type: object
+      required: [data, meta, error]
+      properties:
+        data:  {}
+        meta:  { $ref: '#/components/schemas/Meta' }
+        error: { oneOf: [{ $ref: '#/components/schemas/ApiError' }, { type: 'null' }] }
+
+    Meta:
+      type: object
+      required: [correlationId]
+      properties:
+        correlationId: { type: string, format: uuid }
+        journeyState:
+          type: [string, 'null']
+          enum: [UNREGISTERED, PHONE_CHALLENGE_PENDING, PHONE_VERIFIED_SETUP_PENDING, PROSPECT,
+                 RECOVERY_PENDING, SUSPENDED_OR_REVIEW, null]
+        nextActions:
+          type: array
+          items: { $ref: '#/components/schemas/NextAction' }
+        serverTime: { type: string, format: date-time }
+
+    NextAction:
+      type: object
+      required: [action]
+      properties:
+        action: { type: string, description: Stable action key the client maps to a screen }
+        params: { type: object, additionalProperties: true }
+
+    ApiError:
+      type: object
+      required: [code, copyKey]
+      properties:
+        code:      { type: string, description: Stable machine code from the error catalogue }
+        copyKey:   { type: string, description: Localisation key. Client renders copy; server never sends prose. }
+        retryable: { type: boolean }
+        details:
+          type: object
+          description: Non-sensitive metadata (attemptsRemaining, retryAfterSeconds, reasonCategory)
+          additionalProperties: true
+
+    AppBootstrap:
+      type: object
+      properties:
+        minimumSupportedAppVersion: { type: string }
+        maintenanceMode: { type: boolean }
+        locale: { type: string, examples: ['en-GB'] }
+        featureFlags: { type: object, additionalProperties: { type: boolean } }
+        help: { $ref: '#/components/schemas/HelpEntry' }
+
+    HelpEntry:
+      type: object
+      properties:
+        helpUrl: { type: string, format: uri }
+        contactOptions:
+          type: array
+          items:
+            type: object
+            properties:
+              channel: { type: string, enum: [EMAIL, PHONE, IN_APP_CHAT, WHATSAPP] }
+              value:   { type: string }
+
+    RegistrationJourney:
+      type: object
+      required: [journeyId, state, allowedActions]
+      properties:
+        journeyId: { type: string }
+        state:
+          type: string
+          enum: [MOBILE_ENTRY, OTP_PENDING, PASSCODE_SETUP, BIOMETRICS_OFFER, GREETING,
+                 SERVICE_INTENT, COMPLETE]
+        allowedActions: { type: array, items: { type: string } }
+        journeyToken:   { type: [string, 'null'] }
+        expiresAt:      { type: string, format: date-time }
+        version:        { type: integer, description: Optimistic concurrency }
+
+    PhoneChallenge:
+      type: object
+      required: [challengeId, maskedDestination, expiresAt, resendAvailableAt, attemptsRemaining]
+      properties:
+        challengeId:       { type: string }
+        maskedDestination: { type: string, examples: ['+44 •••• 2030'] }
+        expiresAt:         { type: string, format: date-time }
+        resendAvailableAt: { type: string, format: date-time }
+        attemptsRemaining: { type: integer, minimum: 0 }
+
+    LegalDocument:
+      type: object
+      properties:
+        documentType:  { type: string, enum: [ACCOUNT_TERMS, PRIVACY_NOTICE] }
+        version:       { type: string }
+        url:           { type: string, format: uri }
+        contentHash:   { type: string }
+        effectiveFrom: { type: string, format: date-time }
+
+    CommunicationPreference:
+      type: object
+      properties:
+        preferenceId: { type: string }
+        purpose:      { type: string }
+        channels:     { type: array, items: { type: string } }
+        selection:    { type: string }
+        legalStatus:  { type: string, examples: ['PROVISIONAL_PROTOTYPE_ONLY'] }
+        noticeVersion: { type: string }
+        capturedAt:   { type: string, format: date-time }
+
+    GreetingPreference:
+      type: object
+      properties:
+        preferredName:     { type: [string, 'null'] }
+        preferredGreeting: { type: [string, 'null'] }
+        renderedGreeting:  { type: string, description: 'Falls back to "Welcome to Social Remit."' }
+
+    Device:
+      type: object
+      properties:
+        deviceId:         { type: string }
+        trustState:       { type: string, enum: [PENDING, RECOGNIZED, REVOKED, HIGH_RISK] }
+        biometricEnabled: { type: boolean }
+        platform:         { type: string, enum: [ios, android] }
+        firstSeenAt:      { type: string, format: date-time }
+        lastSeenAt:       { type: string, format: date-time }
+
+    AuthenticatedSession:
+      type: object
+      properties:
+        accessToken:      { type: string }
+        refreshToken:     { type: string }
+        expiresAt:        { type: string, format: date-time }
+        assuranceLevel:   { type: string, enum: [LOW, MEDIUM, HIGH] }
+        authenticatedAt:  { type: string, format: date-time }
+        methodsUsed:      { type: array, items: { type: string, enum: [PHONE_OTP, EMAIL_OTP, PASSCODE, BIOMETRIC] } }
+        deviceTrustState: { type: string, enum: [PENDING, RECOGNIZED, REVOKED, HIGH_RISK] }
+        customerState:
+          type: string
+          enum: [UNREGISTERED, PHONE_CHALLENGE_PENDING, PHONE_VERIFIED_SETUP_PENDING, PROSPECT,
+                 RECOVERY_PENDING, SUSPENDED_OR_REVIEW]
+
+    AuthorizationDecision:
+      type: object
+      required: [decision]
+      properties:
+        decision:
+          type: string
+          enum: [ALLOW, REQUIRE_PASSCODE, REQUIRE_BIOMETRIC_OR_PASSCODE, REQUIRE_OTP,
+                 REQUIRE_RECOVERY, DENY, MANUAL_REVIEW]
+        reasonCategory: { type: [string, 'null'], description: Non-sensitive reason for the customer }
+        challengeId:    { type: [string, 'null'] }
+        expiresAt:      { type: [string, 'null'], format: date-time }

@@ -1,0 +1,66 @@
+# Local development stack.
+#
+# Start:   docker compose up -d
+# Stop:    docker compose down
+# Reset:   docker compose down -v     (the -v also deletes the database volume)
+#
+# Nothing here touches AWS or costs money. LocalStack emulates the AWS services
+# we use so you can develop queues and events without an account.
+
+name: socialremit
+
+services:
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: socialremit-postgres
+    environment:
+      POSTGRES_USER: socialremit
+      POSTGRES_PASSWORD: localdev_only_not_a_real_secret
+      POSTGRES_DB: socialremit_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      # Scripts wait on this before applying migrations. Without it, dev-db.sh
+      # races the container's own startup and fails on a fresh machine.
+      test: ["CMD-SHELL", "pg_isready -U socialremit -d socialremit_dev"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    container_name: socialremit-redis
+    ports:
+      - "6379:6379"
+    # No persistence locally: Redis holds only short-lived state (rate-limit
+    # counters, caches). Anything that must survive a restart belongs in Postgres.
+    command: redis-server --save "" --appendonly no
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  localstack:
+    image: localstack/localstack:3
+    container_name: socialremit-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      SERVICES: sqs,sns,events,s3,secretsmanager,kms
+      DEBUG: "0"
+      AWS_DEFAULT_REGION: eu-west-2
+    volumes:
+      - localstack-data:/var/lib/localstack
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:4566/_localstack/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+volumes:
+  postgres-data:
+  localstack-data:

@@ -1,0 +1,85 @@
+<Project>
+
+  <!--
+    Central Package Management. Every version is declared once, here. A .csproj
+    references a package by name only:
+
+        <PackageReference Include="Npgsql" />
+
+    Without this, seven services drift onto seven versions of the AWS SDK and the
+    first CVE turns into a seven-repo-worth of upgrade work inside one repo.
+
+    Versions are indicative and must be resolved on first `dotnet restore` — .NET 10
+    package versions were not verifiable in the environment this file was authored in.
+  -->
+
+  <PropertyGroup>
+    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>
+    <CentralPackageTransitivePinningEnabled>true</CentralPackageTransitivePinningEnabled>
+  </PropertyGroup>
+
+  <ItemGroup Label="ASP.NET Core and hosting">
+    <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.Extensions.Http.Resilience" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Persistence">
+    <PackageVersion Include="Npgsql" Version="9.0.2" />
+    <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.0" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Design" Version="10.0.0" />
+    <PackageVersion Include="Dapper" Version="2.1.66" />
+    <!-- Migrations run as a pre-deploy ECS task, never on application startup:
+         several tasks starting at once would race on the same schema. -->
+    <PackageVersion Include="FluentMigrator.Runner" Version="6.2.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="AWS">
+    <PackageVersion Include="AWSSDK.EventBridge" Version="4.0.0" />
+    <PackageVersion Include="AWSSDK.SQS" Version="4.0.0" />
+    <PackageVersion Include="AWSSDK.SecretsManager" Version="4.0.0" />
+    <PackageVersion Include="AWSSDK.KeyManagementService" Version="4.0.0" />
+    <PackageVersion Include="AWSSDK.S3" Version="4.0.0" />
+    <PackageVersion Include="AWSSDK.Extensions.NETCore.Setup" Version="4.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Caching">
+    <PackageVersion Include="StackExchange.Redis" Version="2.8.24" />
+  </ItemGroup>
+
+  <ItemGroup Label="Security">
+    <!-- Argon2id for the passcode verifier. Final KDF choice and parameters are a
+         PRE-GO-LIVE decision owned by Security (Baseline 2.0 §20.2). -->
+    <PackageVersion Include="Konscious.Security.Cryptography.Argon2" Version="1.3.1" />
+    <PackageVersion Include="libphonenumber-csharp" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Observability">
+    <PackageVersion Include="OpenTelemetry.Extensions.Hosting" Version="1.11.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.11.0" />
+    <PackageVersion Include="OpenTelemetry.Instrumentation.Http" Version="1.11.0" />
+    <PackageVersion Include="OpenTelemetry.Exporter.OpenTelemetryProtocol" Version="1.11.0" />
+    <PackageVersion Include="Serilog.AspNetCore" Version="9.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Validation and contracts">
+    <PackageVersion Include="FluentValidation.AspNetCore" Version="11.3.1" />
+    <PackageVersion Include="Microsoft.AspNetCore.OpenApi" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup Label="Testing">
+    <PackageVersion Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
+    <PackageVersion Include="xunit" Version="2.9.3" />
+    <PackageVersion Include="xunit.runner.visualstudio" Version="3.0.0" />
+    <PackageVersion Include="FluentAssertions" Version="7.0.0" />
+    <PackageVersion Include="NSubstitute" Version="5.3.0" />
+    <PackageVersion Include="Testcontainers.PostgreSql" Version="4.1.0" />
+    <PackageVersion Include="Testcontainers.LocalStack" Version="4.1.0" />
+    <PackageVersion Include="WireMock.Net" Version="1.6.11" />
+    <PackageVersion Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
+    <!-- Enforces "no service references another service" as a failing test rather
+         than a convention people forget. -->
+    <PackageVersion Include="NetArchTest.Rules" Version="1.3.2" />
+  </ItemGroup>
+
+</Project>

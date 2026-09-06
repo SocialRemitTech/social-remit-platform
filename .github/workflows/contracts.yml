@@ -1,0 +1,227 @@
+name: Contracts
+
+# Contracts are the product. This workflow is what stops them drifting from the
+# code — without it, /contracts becomes documentation nobody trusts within a month.
+
+on:
+  pull_request:
+    paths:
+      - 'contracts/**'
+      - 'building-blocks/**'
+      - 'services/**'
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+
+  validate:
+    name: Validate OpenAPI and event schemas
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Install linters
+        run: npm install -g @redocly/cli@latest ajv-cli@5 ajv-formats@3
+
+      - name: Lint OpenAPI
+        run: redocly lint contracts/openapi/**/*.yaml --format=stylish
+
+      - name: Validate event schemas compile
+        run: |
+          for schema in contracts/events/*.schema.json; do
+            echo "→ $schema"
+            ajv compile -c ajv-formats -s "$schema" --spec=draft2020
+          done
+
+  breaking-changes:
+    name: Detect breaking contract changes
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm install -g @redocly/cli@latest
+
+      - name: Fetch base contracts
+        run: |
+          git fetch origin ${{ github.base_ref }}
+          mkdir -p /tmp/base
+          git archive origin/${{ github.base_ref }} contracts | tar -x -C /tmp/base || true
+
+      # A breaking change to a published mobile contract strands every installed
+      # app version until users update. It is allowed only with an explicit
+      # version bump and the 'contract-breaking-approved' label.
+      - name: Diff mobile BFF contract
+        run: |
+          if [ -f /tmp/base/contracts/openapi/mobile-bff.v1.yaml ]; then
+            redocly diff /tmp/base/contracts/openapi/mobile-bff.v1.yaml \
+                         contracts/openapi/mobile-bff.v1.yaml \
+                         --fail-on=breaking
+          else
+            echo "No base contract — first introduction, nothing to compare."
+          fi
+
+      - name: Require label for approved breaking changes
+        if: failure()
+        run: |
+          if [[ "${{ contains(github.event.pull_request.labels.*.name, 'contract-breaking-approved') }}" == "true" ]]; then
+            echo "Breaking change explicitly approved by label."
+            exit 0
+          fi
+          echo "::error::Breaking change to the public mobile contract. Bump the contract version or apply the 'contract-breaking-approved' label with an ADR link."
+          exit 1
+
+  redaction-lint:
+    name: Reject secrets in event payloads
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Mechanical enforcement of the "no passcodes, OTPs, tokens or provider
+      # error text in events" rule. Code review is not a control.
+      - name: Scan event payload schemas
+        run: |
+          python - <<'PY'
+          import json, pathlib, sys
+
+          envelope = json.loads(pathlib.Path("contracts/events/envelope.schema.json").read_text())
+          forbidden = {k.lower() for k in envelope["$defs"]["forbiddenPayloadKeys"]["const"]}
+
+          violations = []
+          for path in pathlib.Path("contracts/events").glob("*.schema.json"):
+              if path.name == "envelope.schema.json":
+                  continue
+              schema = json.loads(path.read_text())
+
+              def walk(node, trail):
+                  if isinstance(node, dict):
+                      for key, value in node.items():
+                          if key == "properties" and isinstance(value, dict):
+                              for prop in value:
+                                  if prop.lower() in forbidden:
+                                      violations.append(f"{path.name}: {'.'.join(trail)}.{prop}")
+                          walk(value, trail + [key])
+                  elif isinstance(node, list):
+                      for item in node:
+                          walk(item, trail)
+
+              walk(schema, [path.stem])
+
+          if violations:
+              print("::error::Forbidden fields in event payload schemas:")
+              for v in violations:
+                  print(f"  - {v}")
+              sys.exit(1)
+          print("Redaction lint clean.")
+          PY
+
+  error-catalogue-sync:
+    name: Error catalogue matches generated constants
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ErrorCodes.cs is generated from the catalogue. If someone hand-edits
+      # either side, the client's copy deck and the server disagree about what
+      # a code means — which reaches customers as the wrong error message.
+      - name: Compare catalogue to ErrorCodes.cs
+        run: |
+          python - <<'PY'
+          import json, pathlib, re, sys
+
+          catalogue = json.loads(pathlib.Path("contracts/errors/error-catalogue.json").read_text())
+          declared = {e["code"] for e in catalogue["errors"]}
+
+          source = pathlib.Path("building-blocks/SocialRemit.BuildingBlocks.Api/ApiEnvelope.cs").read_text()
+          generated = set(re.findall(r'=\s*"([A-Z][A-Z0-9_]+)"\s*;', source))
+
+          missing = declared - generated
+          extra = generated - declared
+
+          if missing or extra:
+              if missing:
+                  print(f"::error::In catalogue but not in ErrorCodes.cs: {sorted(missing)}")
+              if extra:
+                  print(f"::error::In ErrorCodes.cs but not in catalogue: {sorted(extra)}")
+              sys.exit(1)
+          print(f"Error catalogue in sync ({len(declared)} codes).")
+          PY
+
+  service-isolation:
+    name: No cross-service project references
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # ADR 0001: one solution file is a developer convenience, not permission to
+      # couple. A service may reference building-blocks and nothing else under
+      # /services. Cross-service communication is versioned HTTP or events.
+      - name: Inspect ProjectReference graph
+        run: |
+          python - <<'PY'
+          import pathlib, re, sys
+
+          violations = []
+          for csproj in pathlib.Path("services").rglob("*.csproj"):
+              owner = csproj.relative_to("services").parts[0]
+              text = csproj.read_text()
+              for ref in re.findall(r'<ProjectReference\s+Include="([^"]+)"', text):
+                  resolved = (csproj.parent / ref.replace("\\", "/")).resolve()
+                  try:
+                      rel = resolved.relative_to(pathlib.Path("services").resolve())
+                  except ValueError:
+                      continue  # building-blocks or tests — allowed
+                  referenced = rel.parts[0]
+                  if referenced != owner:
+                      violations.append(f"{owner} -> {referenced} (in {csproj})")
+
+          if violations:
+              print("::error::Cross-service ProjectReference detected. See docs/adr/0001-repository-topology.md")
+              for v in violations:
+                  print(f"  - {v}")
+              sys.exit(1)
+          print("Service isolation clean.")
+          PY
+
+  build-and-test:
+    name: Build and test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - run: dotnet restore
+      - run: dotnet build --no-restore --configuration Release /warnaserror
+
+      # Testcontainers gives every integration test a real PostgreSQL. Outbox,
+      # inbox and idempotency semantics cannot be verified against a fake.
+      - name: Unit and integration tests
+        run: dotnet test --no-build --configuration Release --logger "trx;LogFileName=results.trx"
+
+      - name: Consumer-driven contract tests
+        run: dotnet test tests/contract --configuration Release

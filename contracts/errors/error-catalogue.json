@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Social Remit canonical error catalogue",
+  "version": "1.0.0",
+  "notes": [
+    "Codes are stable forever. A code is never repurposed; retired codes are marked deprecated and left in place.",
+    "The server never sends customer prose. It sends copyKey; the client resolves copy for the active locale.",
+    "No provider (FinCode, MTO, AWS, SMS gateway) error text or code may appear in any field of an API error.",
+    "details carries only non-sensitive metadata. Never attemptsUsed with the submitted value, never the destination in full."
+  ],
+  "errors": [
+
+    { "code": "APP_VERSION_UNSUPPORTED", "http": 426, "copyKey": "error.app.update_required", "retryable": false,
+      "clientTreatment": "Hard block with store link. No other call is made.", "details": ["minimumSupportedAppVersion"] },
+
+    { "code": "MAINTENANCE_MODE", "http": 503, "copyKey": "error.app.maintenance", "retryable": true,
+      "clientTreatment": "Show maintenance screen with Help access retained.", "details": ["retryAfterSeconds"] },
+
+    { "code": "PROSPECT_REQUIRED", "http": 403, "copyKey": "error.access.prospect_required", "retryable": false,
+      "clientTreatment": "Route to registration. Rates and services are not available before phone verification and passcode setup.", "details": ["nextAction"] },
+
+    { "code": "JOURNEY_EXPIRED", "http": 410, "copyKey": "error.journey.expired", "retryable": false,
+      "clientTreatment": "Start a new registration journey. Previously verified facts are preserved server-side.", "details": [] },
+
+    { "code": "JOURNEY_STATE_CONFLICT", "http": 409, "copyKey": "error.journey.out_of_step", "retryable": false,
+      "clientTreatment": "Re-fetch GET /v1/journeys/{id} and render the returned state. Never continue on client assumption.", "details": ["currentState"] },
+
+    { "code": "OTP_INVALID", "http": 400, "copyKey": "error.otp.incorrect", "retryable": true,
+      "clientTreatment": "Clear the field, keep the challenge, show attemptsRemaining.", "details": ["attemptsRemaining"] },
+
+    { "code": "OTP_EXPIRED", "http": 400, "copyKey": "error.otp.expired", "retryable": true,
+      "clientTreatment": "Offer resend. Server timestamps are authoritative, not the client countdown.", "details": ["resendAvailableAt"] },
+
+    { "code": "OTP_SUPERSEDED", "http": 400, "copyKey": "error.otp.superseded", "retryable": true,
+      "clientTreatment": "A newer code was issued. Prompt for the latest code.", "details": [] },
+
+    { "code": "OTP_ATTEMPTS_EXHAUSTED", "http": 400, "copyKey": "error.otp.attempts_exhausted", "retryable": true,
+      "clientTreatment": "Challenge invalidated — NOT the account. Offer a new code.", "details": ["resendAvailableAt"] },
+
+    { "code": "RESEND_TOO_SOON", "http": 429, "copyKey": "error.otp.resend_too_soon", "retryable": true,
+      "clientTreatment": "Display the server countdown. Do not compute locally.", "details": ["resendAvailableAt"] },
+
+    { "code": "RATE_LIMITED", "http": 429, "copyKey": "error.generic.too_many_requests", "retryable": true,
+      "clientTreatment": "Back off. Message must not reveal whether the number exists.", "details": ["retryAfterSeconds"] },
+
+    { "code": "PASSCODE_MISMATCH", "http": 400, "copyKey": "error.passcode.mismatch", "retryable": true,
+      "clientTreatment": "Clear the confirmation entry only, keep the first entry.", "details": [] },
+
+    { "code": "PASSCODE_WEAK", "http": 400, "copyKey": "error.passcode.weak", "retryable": true,
+      "clientTreatment": "Show the safe reason category and hint. Never reveal the blocked list.", "details": ["reasonCategory"] },
+
+    { "code": "PASSCODE_INVALID", "http": 401, "copyKey": "error.passcode.incorrect", "retryable": true,
+      "clientTreatment": "Clear input; render attemptsRemaining and cooldown metadata.", "details": ["attemptsRemaining"] },
+
+    { "code": "PASSCODE_COOLDOWN", "http": 423, "copyKey": "error.passcode.cooldown", "retryable": true,
+      "clientTreatment": "Show server countdown. Offer Reset Passcode. Never a permanent lock.", "details": ["retryAfterSeconds"] },
+
+    { "code": "DEVICE_UNRECOGNIZED", "http": 403, "copyKey": "error.device.unrecognized", "retryable": false,
+      "clientTreatment": "Route to the new-device flow with the exact factors named in details.", "details": ["requiredFactors"] },
+
+    { "code": "AUTHENTICATION_STEP_UP_REQUIRED", "http": 403, "copyKey": "error.auth.step_up_required", "retryable": false,
+      "clientTreatment": "Render the requested method options; re-issue the original request after success.", "details": ["requiredFactors", "challengeId"] },
+
+    { "code": "SESSION_EXPIRED", "http": 401, "copyKey": "error.auth.session_expired", "retryable": false,
+      "clientTreatment": "Silent refresh, then recognised-device sign-in. Do not clear entered form data.", "details": [] },
+
+    { "code": "RECOVERY_EMAIL_UNVERIFIED", "http": 409, "copyKey": "error.recovery.email_unverified", "retryable": false,
+      "clientTreatment": "Route to another approved recovery method. An unverified email never satisfies recovery.", "details": ["availableRoutes"] },
+
+    { "code": "RECOVERY_MANUAL_REQUIRED", "http": 403, "copyKey": "error.recovery.manual_required", "retryable": false,
+      "clientTreatment": "Route to assisted recovery. No automatic bypass exists.", "details": ["referenceId"] },
+
+    { "code": "RISK_REVIEW_REQUIRED", "http": 403, "copyKey": "error.risk.review_required", "retryable": false,
+      "clientTreatment": "Safe status screen with Help. No detail about the risk signal.", "details": ["referenceId"] },
+
+    { "code": "ACCOUNT_RESTRICTED", "http": 403, "copyKey": "error.account.restricted", "retryable": false,
+      "clientTreatment": "Safe status and Help route only.", "details": ["referenceId"] },
+
+    { "code": "IDEMPOTENCY_KEY_REUSED", "http": 409, "copyKey": "error.generic.duplicate_request", "retryable": false,
+      "clientTreatment": "Developer error: same key, different body. Client must generate a new key per distinct intent.", "details": [] },
+
+    { "code": "IDEMPOTENT_REQUEST_IN_PROGRESS", "http": 409, "copyKey": "error.generic.in_progress", "retryable": true,
+      "clientTreatment": "Original request is still running. Retry the same key after retryAfterSeconds.", "details": ["retryAfterSeconds"] },
+
+    { "code": "VALIDATION_FAILED", "http": 400, "copyKey": "error.generic.invalid_input", "retryable": false,
+      "clientTreatment": "Field-level messages from fieldErrors; no server prose.", "details": ["fieldErrors"] },
+
+    { "code": "SERVICE_UNAVAILABLE", "http": 503, "copyKey": "error.generic.try_again", "retryable": true,
+      "clientTreatment": "Generic retry. Never name the failing internal service or provider.", "details": ["retryAfterSeconds"] },
+
+    { "code": "SETUP_COMPLETING", "http": 202, "copyKey": "status.setup.completing", "retryable": true,
+      "clientTreatment": "Downstream projection not yet caught up. Poll GET /v1/journeys/{id}. MUST NOT re-submit credentials.", "details": ["pollAfterSeconds"] }
+  ]
+}

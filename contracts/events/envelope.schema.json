@@ -1,0 +1,95 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.socialremit.com/events/envelope.schema.json",
+  "title": "Social Remit domain event envelope",
+  "description": "Every domain event published to EventBridge or SQS must satisfy this envelope. The payload is validated separately against the schema named by eventType + eventVersion.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "eventId",
+    "eventType",
+    "eventVersion",
+    "occurredAt",
+    "producer",
+    "correlationId",
+    "subjectId",
+    "payload"
+  ],
+  "properties": {
+    "eventId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Unique per publication attempt of a distinct fact. Consumers deduplicate on this value. Redelivery of the same fact MUST reuse the same eventId."
+    },
+    "eventType": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*\\.[a-z][a-z0-9_]*$",
+      "description": "aggregate.fact, e.g. phone.challenge_issued. Version is carried separately, not in the type.",
+      "examples": ["phone.verified", "passcode.configured", "prospect.created"]
+    },
+    "eventVersion": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Incremented only for breaking payload changes. Additive optional fields do not bump this."
+    },
+    "occurredAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "When the fact became true in the producing service, not when it was published."
+    },
+    "producer": {
+      "type": "string",
+      "enum": [
+        "mobile-bff",
+        "identity-access",
+        "customer-journey",
+        "consent-legal",
+        "notification",
+        "audit-reporting",
+        "provider-integration"
+      ]
+    },
+    "correlationId": {
+      "type": "string",
+      "format": "uuid",
+      "description": "Constant for the whole customer-visible interaction. Originates at the BFF."
+    },
+    "causationId": {
+      "type": ["string", "null"],
+      "format": "uuid",
+      "description": "The eventId or requestId that directly caused this event. Null only for events originating from an inbound request."
+    },
+    "subjectId": {
+      "type": "string",
+      "description": "Canonical Social Remit identifier the event is about (sr_customer_id, journeyId, sr_device_id). Never a provider identifier.",
+      "pattern": "^(cus|jrny|dev|ses|ch|pref|rec)_[A-Za-z0-9]{8,}$"
+    },
+    "traceparent": {
+      "type": ["string", "null"],
+      "description": "W3C trace context propagated from the originating request."
+    },
+    "payload": {
+      "type": "object",
+      "description": "Privacy-minimised. MUST NOT contain: passcodes, OTP codes, biometric data, tokens, full phone numbers, full email addresses, legal name, or provider error text.",
+      "additionalProperties": true
+    }
+  },
+  "$defs": {
+    "forbiddenPayloadKeys": {
+      "description": "CI lint rejects any event payload schema declaring these property names.",
+      "const": [
+        "passcode",
+        "passcodeConfirmation",
+        "otp",
+        "code",
+        "accessToken",
+        "refreshToken",
+        "biometricTemplate",
+        "phoneNumber",
+        "email",
+        "legalName",
+        "providerErrorMessage"
+      ]
+    }
+  }
+}

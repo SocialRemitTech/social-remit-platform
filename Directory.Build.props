@@ -1,0 +1,62 @@
+<Project>
+
+  <!--
+    Applied to every project in the repository. These are the settings that keep tech
+    debt from accumulating quietly: warnings are errors, nullable is on, and analyzers
+    run at the strictest useful level from day one.
+
+    Turning any of these on later, once there are 40k lines, never happens.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <!-- A warning that is allowed to persist is a warning nobody reads. -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <WarningLevel>9</WarningLevel>
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <AnalysisLevel>latest-recommended</AnalysisLevel>
+    <AnalysisMode>All</AnalysisMode>
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+
+    <!-- Deterministic builds so a rebuilt artifact is byte-identical — matters for
+         reproducing exactly what shipped when an incident is being investigated. -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <DebugType>portable</DebugType>
+
+    <!-- Never ship a package that was not intended as one. -->
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!--
+    CA1848: prefer LoggerMessage delegates. Enforced rather than suggested, because
+    high-volume auth and OTP logging on a payments platform is a real allocation cost.
+  -->
+  <PropertyGroup>
+    <NoWarn>$(NoWarn);CA1812</NoWarn> <!-- DI-instantiated types look uninstantiated to the analyzer -->
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(IsTestProject)' == 'true'">
+    <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="xunit" />
+    <PackageReference Include="xunit.runner.visualstudio" />
+    <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="NSubstitute" />
+  </ItemGroup>
+
+  <PropertyGroup Condition="'$(IsTestProject)' == 'true'">
+    <!-- Test projects assert on nulls deliberately and are not shipped. -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>
