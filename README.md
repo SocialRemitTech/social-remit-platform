@@ -28,8 +28,8 @@ Definition of Done is green in CI.
 | Step | Name | Delivers | Blocking inputs |
 |---|---|---|---|
 | **1** | **Platform foundation** *(this drop)* | Monorepo layout, canonical API envelope, error catalogue, event envelope + schema registry, transactional outbox/inbox, idempotency store, request-context middleware, platform SQL migration, contract CI | None |
-| 2 | Infrastructure baseline | Terraform: VPC, ECS cluster, ECR, API Gateway, Aurora, Redis, SQS+DLQ, EventBridge bus, KMS, Secrets Manager, OTel→CloudWatch | AWS account topology |
-| 3 | Service template + Mobile BFF | `dotnet new` service template; BFF with `/v1/app/bootstrap`, `/v1/help/entry`, version gating, maintenance mode | Step 1, 2 |
+| **2** | **Infrastructure baseline** *(delivered)* | Terraform: bootstrap state backend, 3-tier VPC, Aurora Serverless v2, Redis, EventBridge + per-consumer SQS/DLQ, 4 KMS keys, secret containers, ECS cluster, ECR, internal ALB + API Gateway, CodeArtifact, per-service DB roles | AWS account |
+| **3** | **Service template + Mobile BFF** *(next)* | `dotnet new` service template; reusable Terraform `service` module; GitHub OIDC deploy role; BFF with `/v1/app/bootstrap`, `/v1/help/entry`, version gating, maintenance mode | Steps 1–2 |
 | 4 | Customer & Journey | `registration_journeys`, `customers`, `customer_profiles`, journey state machine, greeting, service-intent | Step 3 |
 | 5 | Identity & Access (core) | Phone normalisation (E.164), OTP challenge lifecycle, passcode credential + policy, sessions | Step 3; OTP provider |
 | 6 | Consent & Legal | Legal document versions, acceptances w/ evidence, provisional communication preference | Legal doc URLs/versions |

@@ -67,6 +67,8 @@ social-remit-platform/
 │   └── ...Messaging/Inbox.cs            makes duplicate deliveries harmless
 │
 ├── db/platform/001_building_blocks.sql   the three tables every service gets
+├── db/platform/002_service_roles.sql     per-service DB roles and isolation
+├── infrastructure/terraform/        the AWS estate as code (Step 2)
 ├── docs/                            explanations and decision records
 ├── scripts/dev-up.sh                starts the local containers safely
 ├── scripts/api-docs.sh              browsable HTML of the mobile contract

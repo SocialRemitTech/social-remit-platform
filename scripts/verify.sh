@@ -199,6 +199,33 @@ PY
 [ $? -eq 0 ] || FAILURES=$((FAILURES + 1))
 
 # ---------------------------------------------------------------------------
+section "Infrastructure"
+
+if [ -d infrastructure/terraform ]; then
+  if "$PYTHON" -c "import hcl2" 2>/dev/null; then
+    if "$PYTHON" scripts/tf-check.py; then
+      :
+    else
+      FAILURES=$((FAILURES + 1))
+    fi
+  else
+    gap "Terraform checks — install with:  $PYTHON -m pip install python-hcl2"
+  fi
+
+  # terraform fmt is advisory here: not everyone has terraform installed, and a
+  # formatting difference is not worth blocking a laptop check on.
+  if command -v terraform >/dev/null 2>&1; then
+    if terraform fmt -check -recursive infrastructure/terraform >/dev/null 2>&1; then
+      pass "terraform fmt clean"
+    else
+      gap "terraform fmt would reformat files — run:  terraform fmt -recursive infrastructure/terraform"
+    fi
+  fi
+else
+  skip "Infrastructure (no terraform directory)"
+fi
+
+# ---------------------------------------------------------------------------
 section ".NET build"
 # ---------------------------------------------------------------------------
 
